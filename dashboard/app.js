@@ -1,4 +1,4 @@
-// Token Radar 3's dashboard. It reads window.RADAR (written beside dashboard/ by main.ts) and
+// Token Radar 4's dashboard. It reads window.RADAR (written beside dashboard/ by main.ts) and
 // renders the ranked board, a filterable table, a per-protocol detail drawer with the fitted
 // model's own inputs and the protocol's farm plan, and the calibration panel that shows how the
 // model was fitted and how far off it can be. No network: every byte it shows is in data.js.
@@ -33,11 +33,12 @@
     return (x > 0 ? '+' : '') + x.toFixed(3);
   }
   // The model in one function: the page recomputes a row from the fitted curve value and the
-  // age multiplier and checks the number board.json carries, so the page's code and the board's
-  // data are visibly the same arithmetic. The curve value is full precision in data.js and the
-  // same range guard is applied here, so the recompute is the board's number exactly.
+  // age, interaction and chain multipliers and checks the number board.json carries, so the
+  // page's code and the board's data are visibly the same arithmetic. The curve value is full
+  // precision in data.js and the same range guard is applied here, so the recompute is the
+  // board's number exactly.
   function impliedOf(row) {
-    var v = Math.max(1, Math.round(row.curve_value_usd * row.growth_multiplier * row.maturity_multiplier));
+    var v = Math.max(1, Math.round(row.curve_value_usd * row.growth_multiplier * row.maturity_multiplier * row.interact_multiplier * row.chains_multiplier));
     return Math.max(CAL.live_mcap_min, Math.min(CAL.live_mcap_max, v));
   }
   function recomputeMatches(row) {
@@ -187,7 +188,7 @@
 
   function header() {
     return el('header', { class: 'top' },
-      el('div', { class: 'brand' }, el('span', { class: 'mark' }), el('span', { class: 'brand-name', text: 'Token Radar 3 · ridge comps model' })),
+      el('div', { class: 'brand' }, el('span', { class: 'mark' }), el('span', { class: 'brand-name', text: 'Token Radar 4 · ridge comps model' })),
       el('div', { class: 'top-meta' },
         el('span', { text: 'Snapshot ' + DATA.as_of }),
         el('span', { text: 'DefiLlama protocol index' }),
@@ -218,17 +219,17 @@
     return el('section', { class: 'calib', 'aria-label': 'How the model was fitted' },
       el('h2', { text: 'The model, fitted on the snapshot — and how far off it can be' }),
       el('div', { class: 'formula' },
-        'implied = clamp( round( 10^( ' + CAL.intercept_raw + ' + ' + CAL.slope_tvl + ' x log10(tvl_usd) + ' + CAL.coef_age_raw + ' x age/1095 ) ), ' + fmtUsd(CAL.live_mcap_min) + ', ' + fmtUsd(CAL.live_mcap_max) + ' ) — age term capped at ±' + CAL.age_cap + ' in log10'
+        'implied = clamp( round( 10^( ' + CAL.intercept_raw + ' + ' + CAL.slope_tvl + ' x log10(tvl_usd) + ' + CAL.coef_age_raw + ' x age/1095 + ' + CAL.coef_interact_raw + ' x log10(tvl_usd) x age/1095 + ' + CAL.coef_chains_raw + ' x chains ) ), ' + fmtUsd(CAL.live_mcap_min) + ', ' + fmtUsd(CAL.live_mcap_max) + ' ) — age term capped at ±' + CAL.age_cap + ' in log10'
       ),
       el('div', { class: 'calib-grid' },
         el('div', { class: 'calib-stat' }, el('span', { text: 'Comparables fitted' }), el('b', { text: String(CAL.n_fit) + ' live-token protocols' })),
-        el('div', { class: 'calib-stat' }, el('span', { text: 'Model' }), el('b', { text: 'ridge, λ = ' + CAL.lambda + ', on log10(TVL) and age' })),
+        el('div', { class: 'calib-stat' }, el('span', { text: 'Model' }), el('b', { text: 'ridge, λ = ' + CAL.lambda + ', on log10(TVL), age, their product and chain count' })),
         el('div', { class: 'calib-stat' }, el('span', { text: 'Fit R²' }), el('b', { text: String(CAL.r2) })),
         el('div', { class: 'calib-stat' }, el('span', { text: 'Leave-one-out error' }), el('b', { text: '±' + CAL.loo_median_log_err + ' in log10 (' + CAL.loo_factor + 'x)' })),
         el('div', { class: 'calib-stat' }, el('span', { text: 'Uncertainty band (10–90%)' }), el('b', { text: 'x' + Math.pow(10, CAL.loo_q10).toFixed(2) + ' – x' + Math.pow(10, CAL.loo_q90).toFixed(2) + ', covers ' + (CAL.loo_coverage * 100).toFixed(1) + '%' })),
         el('div', { class: 'calib-stat' }, el('span', { text: 'Age cap binds' }), el('b', { text: String(CAL.age_capped_count) + ' of ' + CAL.age_capped_total + ' protocols' }))
       ),
-      el('p', { class: 'sub', text: 'TVL and age together explain little of a token\'s market cap (R² = ' + CAL.r2 + '): the typical comparable is off by ' + CAL.loo_factor + 'x, and the 10–90% band runs from x' + Math.pow(10, CAL.loo_q10).toFixed(2) + ' to x' + Math.pow(10, CAL.loo_q90).toFixed(2) + ' around the point estimate. A model that hides that error is not a model, so every implied value here is a fitted estimate with that error, not a price. The age effect is fitted, not a prior — and it is negative (coefficient ' + CAL.coef_age_raw + ' on age/1095): holding TVL fixed, older protocols trade lower, so the age multiplier rewards youth. Seven-day growth was tested and dropped: it raises the leave-one-out error at every penalty, so the growth multiplier is 1. Chain count was tested and dropped for the same reason. Category offsets were tested under an honest nested leave-one-out and dropped too — they raise the error, so there are none. Fees, revenue, volume, holders and liquidity are not fields the snapshot carries, so no model on this snapshot can use them.' }),
+      el('p', { class: 'sub', text: 'TVL, age, their interaction and chain count together explain little of a token\'s market cap (R² = ' + CAL.r2 + '): the typical comparable is off by ' + CAL.loo_factor + 'x, and the 10–90% band runs from x' + Math.pow(10, CAL.loo_q10).toFixed(2) + ' to x' + Math.pow(10, CAL.loo_q90).toFixed(2) + ' around the point estimate. A model that hides that error is not a model, so every implied value here is a fitted estimate with that error, not a price. The age effect is fitted, not a prior — and it is negative (coefficient ' + CAL.coef_age_raw + ' on age/1095): holding TVL fixed, older protocols trade lower, so the age multiplier rewards youth. The interaction (coefficient ' + CAL.coef_interact_raw + ') says the TVL slope itself steepens with age, and the chain count (coefficient ' + CAL.coef_chains_raw + ') is a small drag. Seven-day growth was tested and dropped: it raises the leave-one-out error at every penalty, so the growth multiplier is 1. Category offsets were tested under an honest nested leave-one-out and dropped too — they raise the error, so there are none. Fees, revenue and volume were fetched live from DefiLlama and tested: they help the 66 comparables that report fees, but the 28 that report none have to be imputed, and every imputation tried leaves the full leave-one-out worse than the base, so enrichment is out. Holders and liquidity are not fields any public source carries for this set, so no model on this snapshot can use them.' }),
       el('div', { class: 'calib-grid' },
         el('div', { class: 'calib-stat' }, el('span', { text: 'Error by predicted quintile (low to high)' }), el('b', { text: quintileText })),
         el('div', { class: 'calib-stat' }, el('span', { text: 'Error by category (median, n ≥ 5)' }), el('b', { text: catText }))
@@ -347,9 +348,9 @@
       el('h2', { text: 'How implied value is computed' }),
       el('p', { class: 'sub', text: 'Every row is scored by one fitted function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       el('div', { class: 'formula' },
-        'implied = clamp( round( 10^( ' + CAL.intercept_raw + ' + ' + CAL.slope_tvl + ' x log10(tvl_usd) + ' + CAL.coef_age_raw + ' x age/1095 ) ), ' + fmtUsd(CAL.live_mcap_min) + ', ' + fmtUsd(CAL.live_mcap_max) + ' ) — age term capped at ±' + CAL.age_cap + ' in log10'
+        'implied = clamp( round( 10^( ' + CAL.intercept_raw + ' + ' + CAL.slope_tvl + ' x log10(tvl_usd) + ' + CAL.coef_age_raw + ' x age/1095 + ' + CAL.coef_interact_raw + ' x log10(tvl_usd) x age/1095 + ' + CAL.coef_chains_raw + ' x chains ) ), ' + fmtUsd(CAL.live_mcap_min) + ', ' + fmtUsd(CAL.live_mcap_max) + ' ) — age term capped at ±' + CAL.age_cap + ' in log10'
       ),
-      el('p', { class: 'sub', text: 'The ridge is fitted at run time on the ' + CAL.n_fit + ' live-token protocols in this snapshot (λ = ' + CAL.lambda + ', standardised predictors). TVL and age come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; a protocol with no listing date uses the comparables\' median age of ' + CAL.median_age_days + ' days. The age coefficient is negative, so younger protocols score higher at the same TVL. Seven-day growth, chain count and category offsets were all tested on the leave-one-out splits and dropped — none of them improves the held-out error. The early radar is every pre-token protocol below the watchlist floor, by TVL, and the live-token protocols are set aside with their market caps shown.' })
+      el('p', { class: 'sub', text: 'The ridge is fitted at run time on the ' + CAL.n_fit + ' live-token protocols in this snapshot (λ = ' + CAL.lambda + ', standardised predictors). TVL, age, their product and chain count come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; a protocol with no listing date uses the comparables\' median age of ' + CAL.median_age_days + ' days. The age coefficient is negative, so younger protocols score higher at the same TVL. Seven-day growth and category offsets were all tested on the leave-one-out splits and dropped — none of them improves the held-out error. Fees, revenue and volume were fetched live from DefiLlama and tested, and dropped for the same reason: they help only the comparables that report them. The early radar is every pre-token protocol below the watchlist floor, by TVL, and the live-token protocols are set aside with their market caps shown.' })
     );
   }
 
@@ -382,6 +383,8 @@
         el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
         el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: row.growth_multiplier.toFixed(4) + ' (no fitted growth effect)' })),
         el('div', null, el('span', { text: 'Age multiplier' }), el('b', { class: 'num', text: row.maturity_multiplier.toFixed(4) })),
+        el('div', null, el('span', { text: 'TVL × age multiplier' }), el('b', { class: 'num', text: row.interact_multiplier.toFixed(4) })),
+        el('div', null, el('span', { text: 'Chain-count multiplier' }), el('b', { class: 'num', text: row.chains_multiplier.toFixed(4) })),
         el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) })),
         el('div', null, el('span', { text: 'Uncertainty band (10–90%)' }), el('b', { class: 'num', text: bandOf(row) }))
       ),

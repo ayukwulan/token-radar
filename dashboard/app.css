@@ -1,6 +1,7 @@
-/* Token Radar 2 theme. Warm paper canvas, deep navy ink, amber accent: a radar console, not a
+/* Token Radar 4 theme. Warm paper canvas, deep navy ink, amber accent: a radar console, not a
    framework paste. Five palette values, two radii, two families; everything else is spacing, a
-   hairline and a type step. */
+   hairline and a type step. Radar 4 keeps radar-3's palette and adds a shadow under the detail
+   drawer and a visible keyboard focus on table rows. */
 :root {
   --canvas: #f5f2ea;
   --surface: #fffdf8;
@@ -98,6 +99,7 @@ th button { display: inline-flex; align-items: center; gap: var(--step-1); borde
 th button:hover { color: var(--ink); }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--accent-soft); }
+tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 tbody tr[data-selected="true"] { background: var(--accent-soft); }
 .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .name { display: grid; gap: 2px; }
@@ -122,7 +124,7 @@ tbody tr[data-selected="true"] { background: var(--accent-soft); }
 .detail {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 94vw); z-index: 10;
   background: var(--surface); border-left: 1px solid var(--border); padding: var(--step-5);
-  overflow-y: auto;
+  overflow-y: auto; box-shadow: -12px 0 32px rgba(27, 36, 54, 0.18);
 }
 .detail[hidden] { display: none; }
 .detail { margin: 0 0 0 auto; max-height: 100%; }
