@@ -1,4 +1,4 @@
-// radar-3's entrypoint (Node 22, standard library only).
+// radar-4's entrypoint (Node 22, standard library only).
 //
 // Reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), fits the ridge
 // comps model on the snapshot's own live-token protocols, writes the ranked board to /output/board.json,
@@ -89,6 +89,6 @@ const cal = radar.calibration;
 const dossierBytes = statSync(join(out, 'dossier.json')).size;
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: ridge fit on ${cal.n_fit} live-token protocols (lambda ${cal.lambda}): log10(mcap) = ${cal.intercept_raw} + ${cal.slope_tvl} x log10(tvl) + ${cal.coef_age_raw} x age/1095, R2 = ${cal.r2}, leave-one-out median error ${cal.loo_median_log_err} in log10 (${cal.loo_factor}x), 10-90 band x${(10 ** cal.loo_q10).toFixed(2)}-${(10 ** cal.loo_q90).toFixed(2)} covering ${(cal.loo_coverage * 100).toFixed(1)}% of comparables\n` +
+    `token radar: ridge fit on ${cal.n_fit} live-token protocols (lambda ${cal.lambda}): log10(mcap) = ${cal.intercept_raw} + ${cal.slope_tvl} x log10(tvl) + ${cal.coef_age_raw} x age/1095 + ${cal.coef_interact_raw} x log10(tvl)*age/1095 + ${cal.coef_chains_raw} x chains, R2 = ${cal.r2}, leave-one-out median error ${cal.loo_median_log_err} in log10 (${cal.loo_factor}x), 10-90 band x${(10 ** cal.loo_q10).toFixed(2)}-${(10 ** cal.loo_q90).toFixed(2)} covering ${(cal.loo_coverage * 100).toFixed(1)}% of comparables\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')} (${dossierBytes} bytes)\n`,
 );
