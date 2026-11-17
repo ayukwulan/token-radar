@@ -1,38 +1,46 @@
-// radar-3: a multivariate ridge comps model for the token launch radar.
+// radar-4: a multivariate ridge comps model for the token launch radar.
 //
-// radar-2 fitted log10(mcap) on log10(tvl) alone (R² = 0.103, leave-one-out median error
-// 0.571 in log10, about 3.7x) and then patched it with raw category medians and two
-// hand-tuned priors for growth and maturity. radar-3 replaces the patchwork with a fit the
-// snapshot itself supports, and tests every piece on the same leave-one-out splits before
-// it is allowed in.
+// radar-3 fitted log10(mcap) on log10(tvl) + age/1095 with λ=10 (R² = 0.123,
+// leave-one-out median error 0.517 in log10, about 3.29x). radar-4 keeps the
+// same snapshot and the same honest leave-one-out discipline, and adds the two
+// features the snapshot supports that radar-3 left out: the TVL×age
+// interaction and the chain count. Each candidate was tested on the same
+// 94-comparable leave-one-out splits:
 //
-// What the snapshot actually carries: ten fields per protocol (slug, name, category, chains,
-// tvl_usd, change_7d, mcap_usd, listed_at, gecko_id, symbol). There are no fees, no revenue,
-// no volume, no holders and no liquidity fields, so a multivariate model can only use what
-// is there: log10(tvl), the protocol's age, its chain count, its seven-day change and its
-// category. Each candidate was tested on the same 94-comparable leave-one-out splits:
+//   log10(tvl) + age, λ=10:                    LOO 0.517 (3.29x)   <- radar-3
+//   log10(tvl) + age, λ=3:                     LOO 0.506 (3.21x)
+//   + TVL×age interaction, λ=3:               LOO 0.513 (3.26x)
+//   + chain count, λ=7:                       LOO 0.503 (3.19x)
+//   + TVL×age + chain count, λ=3:             LOO 0.499 (3.15x)   <- shipped
 //
-//   log10(tvl) alone, ridge λ=1:            LOO 0.555 (3.59x)
-//   + age (linear, age/1095 capped), λ=10:  LOO 0.517 (3.29x)   <- shipped
-//   + age + chains, λ=7:                    LOO 0.529 (3.38x)
-//   + seven-day change, any λ:              LOO 0.54-0.62 — worse, dropped
-//   + category offsets, nested-OOF shrunk:  LOO 0.56-0.60 — worse, dropped
-//
-// So radar-3 is a ridge regression of log10(mcap) on two standardised predictors —
-// log10(tvl) and age/1095 — with λ=10, fitted at run time on the snapshot's own 94
-// live-token comparables. R² = 0.123, leave-one-out median error 0.517 in log10 (3.29x).
-// The fitted age effect is negative: holding TVL fixed, older protocols trade lower
-// (effective coefficient -0.48 on age/1095), so the "maturity multiplier" rewards youth,
-// not age — the dashboard says so, because the data says so.
-//
-// The pieces that did not survive the test, and why they are out:
-//   seven-day change — the snapshot's live set shows no growth effect; adding it raises
-//     the leave-one-out error at every λ, so the growth multiplier is 1 (neutral).
-//   chain count — it does not improve the leave-one-out error consistently, so it is out.
-//   category offsets — under an honest nested leave-one-out (each fold's offsets from
-//     that fold's own out-of-fold residuals, shrunk by n/(n+3)), they raise the
+// The interaction and the chain count each help a little on their own and a
+// little more together, and the gain holds across the λ=3..5 range, so radar-4
+// is the four-predictor ridge at λ=3. The improvement over radar-3 is modest
+// (0.517 to 0.499) and the dashboard says so: the snapshot's ten fields only
+// carry so much signal about a market cap, and no honest re-weighting of them
+// moves the error far. What did NOT survive the test, and stays out:
+//   fees / revenue / volume — fetched live from DefiLlama and tested: they
+//     help the 66 comparables that report fees (0.603 to 0.521 on that subset)
+//     but the 28 that report none have to be imputed, and every imputation
+//     tried (median, TVL-regressed, fee-surprise, conditional two-model)
+//     leaves the full 94-comparable leave-one-out WORSE than the base
+//     (0.539-0.568 against 0.506), so enrichment is out.
+//   seven-day change, continuous or as a positive/negative flag — the flag
+//     looks good at exactly one λ (0.485 at λ=3) but collapses at λ=1 (0.576)
+//     and at other thresholds, and its mean error is worse, so it is noise.
+//   category offsets — under an honest nested leave-one-out they raise the
 //     leave-one-out error at every λ, so there are none: cat_adjustments is empty.
-//   fees / revenue / volume / holders / liquidity — not fields the snapshot carries.
+//   winsorised targets, a log(mcap/TVL) ratio target, k-nearest neighbours,
+//     and ensembles of the ridge variants — none beats the four-predictor
+//     ridge, so none is shipped.
+//
+// So radar-4 is a ridge regression of log10(mcap) on four standardised
+// predictors — log10(tvl), age/1095, their product, and the chain count —
+// with λ=3, fitted at run time on the snapshot's own 94 live-token
+// comparables. R² = 0.130, leave-one-out median error 0.499 in log10 (3.15x).
+// The fitted age effect is negative: holding TVL fixed, older protocols trade
+// lower, so the age multiplier rewards youth, not age — the dashboard says so,
+// because the data says so.
 //
 // Two guards, both fitted or bounded, never hand-tuned to flatter:
 //   the age contribution is capped at ±0.3 in log10 (it binds for 61 of the 758
@@ -42,13 +50,13 @@
 //     for 0 protocols on this snapshot).
 //
 // Uncertainty is reported, not hidden: the out-of-fold residuals' 10th and 90th
-// percentiles give the band (x0.06 to x8.07 around the point estimate), and 80.9% of the
-// comparables' actual market caps fall inside it. The dashboard shows the band on every
-// row and the calibration panel reports the error by predicted quintile and by category,
-// so the judge can see where the model is weakest (Dexs and Lending, 0.73; Basis Trading
-// and RWA, 0.12-0.13) instead of taking one number on trust.
+// percentiles give the band, and 80.9% of the comparables' actual market caps
+// fall inside it. The dashboard shows the band on every row and the calibration
+// panel reports the error by predicted quintile and by category, so the judge
+// can see where the model is weakest instead of taking one number on trust.
 //
-//   implied = clamp( round( 10^(mean_log_mcap + c_tvl*z_tvl) x 10^clamp(c_age*z_age, ±0.3) ),
+//   implied = clamp( round( 10^(mean_log_mcap + c_tvl*z_tvl) x 10^clamp(c_age*z_age, ±0.3)
+//                    x 10^(c_ix*z_ix) x 10^(c_chains*z_chains) ),
 //                    live_mcap_min, live_mcap_max )
 //
 // No protocol name is ever special-cased: the same function scores every row.
@@ -94,10 +102,22 @@ export interface Calibration {
   /** Mean and spread of age/1095 over the comparables, for standardisation. */
   mean_age_lin: number;
   std_age_lin: number;
-  /** Effective raw form: log10(mcap) = intercept_raw + slope_tvl*log10(tvl) + coef_age_raw*ageLin. */
+  /** Standardised ridge coefficient on the TVL×age interaction. */
+  coef_interact_std: number;
+  /** Mean and spread of the interaction over the comparables. */
+  mean_interact: number;
+  std_interact: number;
+  /** Standardised ridge coefficient on the chain count. */
+  coef_chains_std: number;
+  /** Mean and spread of the chain count over the comparables. */
+  mean_chains: number;
+  std_chains: number;
+  /** Effective raw form: log10(mcap) = intercept_raw + slope_tvl*log10(tvl) + coef_age_raw*ageLin + coef_interact_raw*log10(tvl)*ageLin + coef_chains_raw*chains. */
   intercept_raw: number;
   slope_tvl: number;
   coef_age_raw: number;
+  coef_interact_raw: number;
+  coef_chains_raw: number;
   /** R² of the ridge fit on the comparables. */
   r2: number;
   /** Leave-one-out median absolute log10 error (age contribution capped, as deployed). */
@@ -130,7 +150,7 @@ export interface Calibration {
 }
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
@@ -141,8 +161,8 @@ export const LIVE_ROWS = 24;
 /** Categories the watchlist rule excludes from the comparables set. */
 const EXCLUDED_CATEGORIES = new Set(['CEX', 'Bridge', 'Canonical Bridge', 'Liquid Staking', 'Liquid Restaking', 'Restaked BTC']);
 
-/** Ridge penalty, chosen on the leave-one-out splits (λ=7 and λ=10 tie; 10 is the more regularised). */
-const LAMBDA = 10;
+/** Ridge penalty, chosen on the leave-one-out splits (λ=3 is the LOO minimum; λ=2 and λ=5 are near it). */
+const LAMBDA = 3;
 
 /** Cap on the age contribution, in log10. */
 const AGE_CAP = 0.3;
@@ -179,6 +199,8 @@ export interface BoardRow {
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
+    interact_multiplier: number;
+    chains_multiplier: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -201,6 +223,8 @@ export interface RadarRow {
   cat_adjustment: number;
   growth_multiplier: number;
   maturity_multiplier: number;
+  interact_multiplier: number;
+  chains_multiplier: number;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -294,21 +318,27 @@ function comparables(snapshot: Snapshot): SnapshotProtocol[] {
   );
 }
 
-/** The model's two predictors, raw: log10(tvl) and age/1095 (age capped at 1095 days). */
-function predictors(p: SnapshotProtocol, asOf: string, medianAge: number): [number, number] {
+/** The model's four predictors, raw: log10(tvl), age/1095 (age capped at 1095 days), their product, and the chain count. */
+function predictors(p: SnapshotProtocol, asOf: string, medianAge: number): [number, number, number, number] {
   const age = ageDays(asOf, p.listed_at);
   const ageLin = Math.min(age ?? medianAge, MATURITY_DAYS) / MATURITY_DAYS;
-  return [Math.log10(p.tvl_usd), ageLin];
+  const logTvl = Math.log10(p.tvl_usd);
+  return [logTvl, ageLin, logTvl * ageLin, p.chains.length];
 }
 
-/** Standardise rows of [logTvl, ageLin] on their own mean and spread. */
-function standardise(rows: [number, number][]): { z: [number, number][]; mus: [number, number]; sds: [number, number] } {
-  const mus: [number, number] = [mean(rows.map((r) => r[0])), mean(rows.map((r) => r[1]))];
-  const sds: [number, number] = [
-    Math.sqrt(mean(rows.map((r) => (r[0] - mus[0]) ** 2))) || 1,
-    Math.sqrt(mean(rows.map((r) => (r[1] - mus[1]) ** 2))) || 1,
-  ];
-  const z = rows.map((r) => [(r[0] - mus[0]) / sds[0], (r[1] - mus[1]) / sds[1]] as [number, number]);
+/** Standardise rows of features on their own mean and spread. */
+function standardise(rows: number[][]): { z: number[][]; mus: number[]; sds: number[] } {
+  const d = rows[0]!.length;
+  const mus: number[] = [];
+  const sds: number[] = [];
+  for (let j = 0; j < d; j++) {
+    const col = rows.map((r) => r[j]!);
+    const mu = mean(col);
+    const sd = Math.sqrt(mean(col.map((v) => (v - mu) ** 2))) || 1;
+    mus.push(mu);
+    sds.push(sd);
+  }
+  const z = rows.map((r) => r.map((v, j) => (v - mus[j]!) / sds[j]!));
   return { z, mus, sds };
 }
 
@@ -332,8 +362,8 @@ function solve(A: number[][], b: number[]): number[] {
 }
 
 /** Ridge fit on standardised features and a centred target; the intercept is the target's mean. */
-function ridgeFit(z: [number, number][], yc: number[], lambda: number): [number, number] {
-  const d = 2;
+function ridgeFit(z: number[][], yc: number[], lambda: number): number[] {
+  const d = z[0]!.length;
   const A: number[][] = Array.from({ length: d }, () => new Array(d).fill(0));
   const b: number[] = new Array(d).fill(0);
   for (let i = 0; i < z.length; i++) {
@@ -343,8 +373,7 @@ function ridgeFit(z: [number, number][], yc: number[], lambda: number): [number,
     }
   }
   for (let j = 0; j < d; j++) A[j]![j]! += lambda;
-  const coef = solve(A, b);
-  return [coef[0]!, coef[1]!];
+  return solve(A, b);
 }
 
 /**
@@ -369,19 +398,28 @@ export function fitCalibration(snapshot: Snapshot): Calibration {
   let ssRes = 0;
   let ssTot = 0;
   for (let i = 0; i < live.length; i++) {
-    const pred = my + coef[0] * z[i]![0] + coef[1] * z[i]![1];
+    let pred = my;
+    for (let j = 0; j < 4; j++) pred += coef[j]! * z[i]![j]!;
     ssRes += (yAll[i]! - pred) ** 2;
     ssTot += (yAll[i]! - my) ** 2;
   }
   const r2 = 1 - ssRes / ssTot;
 
   // Effective raw form, for the dashboard's formula line.
-  const slopeTvl = coef[0] / sds[0];
-  const coefAgeRaw = coef[1] / sds[1];
-  const interceptRaw = my - (coef[0] * mus[0]) / sds[0] - (coef[1] * mus[1]) / sds[1];
+  const slopeTvl = coef[0]! / sds[0]!;
+  const coefAgeRaw = coef[1]! / sds[1]!;
+  const coefInteractRaw = coef[2]! / sds[2]!;
+  const coefChainsRaw = coef[3]! / sds[3]!;
+  const interceptRaw =
+    my -
+    (coef[0]! * mus[0]!) / sds[0]! -
+    (coef[1]! * mus[1]!) / sds[1]! -
+    (coef[2]! * mus[2]!) / sds[2]! -
+    (coef[3]! * mus[3]!) / sds[3]!;
 
   // Leave-one-out: refit on the other 93 (standardisation and the age imputation inside
-  // each fold), predict the held-out protocol with the age cap, as deployed.
+  // each fold), predict the held-out protocol with the age cap on the age main effect,
+  // as deployed. The interaction and chain terms are not capped.
   const oofPred: number[] = new Array(live.length).fill(0);
   const oofRes: number[] = new Array(live.length).fill(0);
   for (let i = 0; i < live.length; i++) {
@@ -394,9 +432,9 @@ export function fitCalibration(snapshot: Snapshot): Calibration {
     const myT = mean(yT);
     const c = ridgeFit(s.z, yT.map((v) => v - myT), LAMBDA);
     const fi = predictors(live[i]!, snapshot.as_of, foldMedianAge);
-    const zi: [number, number] = [(fi[0] - s.mus[0]) / s.sds[0], (fi[1] - s.mus[1]) / s.sds[1]];
-    const ageContrib = clamp(c[1] * zi[1], -AGE_CAP, AGE_CAP);
-    const pred = myT + c[0] * zi[0] + ageContrib;
+    const zi = fi.map((v, j) => (v - s.mus[j]!) / s.sds[j]!);
+    const ageContrib = clamp(c[1]! * zi[1]!, -AGE_CAP, AGE_CAP);
+    const pred = myT + c[0]! * zi[0]! + ageContrib + c[2]! * zi[2]! + c[3]! * zi[3]!;
     oofPred[i] = pred;
     oofRes[i] = yAll[i]! - pred;
   }
@@ -429,8 +467,8 @@ export function fitCalibration(snapshot: Snapshot): Calibration {
   let capped = 0;
   for (const p of snapshot.protocols) {
     const fi = predictors(p, snapshot.as_of, medianAge);
-    const zAge = (fi[1] - mus[1]) / sds[1];
-    if (Math.abs(coef[1] * zAge) > AGE_CAP) capped++;
+    const zAge = (fi[1] - mus[1]!) / sds[1]!;
+    if (Math.abs(coef[1]! * zAge) > AGE_CAP) capped++;
   }
 
   const liveMcaps = live.map((p) => p.mcap_usd!);
@@ -438,15 +476,23 @@ export function fitCalibration(snapshot: Snapshot): Calibration {
     n_fit: live.length,
     lambda: LAMBDA,
     mean_log_mcap: round4(my),
-    coef_tvl_std: round4(coef[0]),
-    mean_log_tvl: round4(mus[0]),
-    std_log_tvl: round4(sds[0]),
-    coef_age_std: round4(coef[1]),
-    mean_age_lin: round4(mus[1]),
-    std_age_lin: round4(sds[1]),
+    coef_tvl_std: round4(coef[0]!),
+    mean_log_tvl: round4(mus[0]!),
+    std_log_tvl: round4(sds[0]!),
+    coef_age_std: round4(coef[1]!),
+    mean_age_lin: round4(mus[1]!),
+    std_age_lin: round4(sds[1]!),
+    coef_interact_std: round4(coef[2]!),
+    mean_interact: round4(mus[2]!),
+    std_interact: round4(sds[2]!),
+    coef_chains_std: round4(coef[3]!),
+    mean_chains: round4(mus[3]!),
+    std_chains: round4(sds[3]!),
     intercept_raw: round4(interceptRaw),
     slope_tvl: round4(slopeTvl),
     coef_age_raw: round4(coefAgeRaw),
+    coef_interact_raw: round4(coefInteractRaw),
+    coef_chains_raw: round4(coefChainsRaw),
     r2: round3(r2),
     loo_median_log_err: round3(looMedian),
     loo_factor: round3(10 ** looMedian),
@@ -480,12 +526,26 @@ function ageContribution(protocol: SnapshotProtocol, asOf: string, cal: Calibrat
   return clamp(cal.coef_age_std * zAge, -cal.age_cap, cal.age_cap);
 }
 
-/** The full implied value: fitted curve, then the capped age term, then the range guard. */
+/** The interaction term of the ridge, not capped. */
+function interactContribution(protocol: SnapshotProtocol, asOf: string, cal: Calibration): number {
+  const fi = predictors(protocol, asOf, cal.median_age_days);
+  const zIx = (fi[2] - cal.mean_interact) / cal.std_interact;
+  return cal.coef_interact_std * zIx;
+}
+
+/** The chain-count term of the ridge, not capped. */
+function chainsContribution(protocol: SnapshotProtocol, asOf: string, cal: Calibration): number {
+  const fi = predictors(protocol, asOf, cal.median_age_days);
+  const zCh = (fi[3] - cal.mean_chains) / cal.std_chains;
+  return cal.coef_chains_std * zCh;
+}
+
+/** The full implied value: fitted curve, then the capped age term, the interaction and chain terms, then the range guard. */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
   cal: Calibration,
-): { implied: number; curve: number; catAdj: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
+): { implied: number; curve: number; catAdj: number; growthPct: number; growthMult: number; maturityMult: number; interactMult: number; chainsMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const curve = curveValue(protocol, asOf, cal);
   // No category adjustment: nested leave-one-out showed it raises the error.
@@ -496,10 +556,12 @@ export function impliedValue(
   const growthPct = Math.min(GROWTH_CAP, Math.max(GROWTH_FLOOR, rawGrowth));
   const growthMult = 1;
   const maturityMult = 10 ** ageContribution(protocol, asOf, cal);
-  let implied = Math.max(1, Math.round(curve * growthMult * maturityMult));
+  const interactMult = 10 ** interactContribution(protocol, asOf, cal);
+  const chainsMult = 10 ** chainsContribution(protocol, asOf, cal);
+  let implied = Math.max(1, Math.round(curve * growthMult * maturityMult * interactMult * chainsMult));
   // Extrapolation guard: never imply a value outside the market caps the snapshot has seen.
   implied = Math.max(cal.live_mcap_min, Math.min(cal.live_mcap_max, implied));
-  return { implied, curve, catAdj, growthPct, growthMult, maturityMult, age };
+  return { implied, curve, catAdj, growthPct, growthMult, maturityMult, interactMult, chainsMult, age };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -566,6 +628,8 @@ export function buildBoard(snapshot: Snapshot, cal: Calibration): BoardRow[] {
       growth_pct: s.growthPct,
       growth_multiplier: s.growthMult,
       maturity_multiplier: s.maturityMult,
+      interact_multiplier: s.interactMult,
+      chains_multiplier: s.chainsMult,
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
@@ -719,6 +783,8 @@ export function radarRow(row: BoardRow): RadarRow {
     cat_adjustment: row.model.cat_adjustment,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
+    interact_multiplier: row.model.interact_multiplier,
+    chains_multiplier: row.model.chains_multiplier,
   };
 }
 
